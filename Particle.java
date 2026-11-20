@@ -1,72 +1,131 @@
 import java.awt.Color;
-import java.awt.Graphics2D;
+import java.awt.Graphics;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.io.IOException;
+import javax.imageio.ImageIO;
 
-class Particle {
-    private double x, y;
-    private double vx, vy;
+public class Particle {
+    // TO DO: Add Instance Variables (State)
+    private Color color;
     private int radius;
+    private double x;
+    private double y;
+    private double vx;
+    private double vy;
 
-    public Particle(double x, double y, double vx, double vy, int radius) {
+    // TO DO: Constructor
+    public Particle(double x, double y, double vx, double vy, int radius, Color color) {
         this.x = x;
         this.y = y;
         this.vx = vx;
         this.vy = vy;
         this.radius = radius;
+        this.color = color;
     }
 
-    public void update(int width, int height, double gravity) {
-        // Apply gravity acceleration
+    // TO DO: Behavior - Update physics position based on velocity
+    public void update(double gravity, int height, int width) {
         this.vy += gravity;
-
-        // Apply velocity vector to position coordinates
         this.x += this.vx;
         this.y += this.vy;
 
-        // Wall boundary collision checks with energy loss (0.75 damping)
-        double damping = 0.75;
-        if (this.x - radius < 0) {
+        double damping = 0.75; // 75% velocity retention 25% energy loss
+
+        // left and right wall checks
+        if (this.x -radius < 0) 
+        {
             this.x = radius;
             this.vx *= -damping;
-        } else if (this.x + radius > width) {
+        }
+        else if (this.x + radius > width)
+        {
             this.x = width - radius;
             this.vx *= -damping;
         }
 
+        // Top and Bottom Wall 
         if (this.y - radius < 0) {
             this.y = radius;
             this.vy *= -damping;
-        } else if (this.y + radius > height) {
+        }
+        else if (this.y + radius > height)
+        {
             this.y = height - radius;
             this.vy *= -damping;
         }
     }
 
-    // Handles short-range fluid repulsion & collision response between two particles
-    public void resolveCollision(Particle other) {
+    // Behavior: Render particle onto canvas
+    public void draw(Graphics g) {
+        g.setColor(this.color);
+        // Cast double coordinates to int pixels for drawing, centering on (x, y)
+        int drawX = (int) (this.x - this.radius);
+        int drawY = (int) (this.y - this.radius);
+        int diameter = this.radius * 2;
+        
+        g.fillOval(drawX, drawY, diameter, diameter);
+        double speed = Math.sqrt(vx*vx + vy*vy);
+        double maxSpeed = 12.0;
+        double speedRatio = Math.min(speed / maxSpeed, 1.0);
+        double hue = 0.66 - (speedRatio * 0.66);
+        Color myColor = Color.getHSBColor((float) hue,(float) 0.85,(float) 1.0);
+        g.setColor(myColor);
+        g.fillOval((int) x-radius,(int) y-radius, radius*2,radius*2);
+    }
+
+    // Getters and Setters
+    public double getX() { return x; }
+    public double getY() { return y; }
+    public double getVx() { return vx; }
+    public double getVy() { return vy; }
+    public void setVx(double vx) { this.vx = vx; }
+    public void setVy(double vy) { this.vy = vy; }
+
+    // add that repulsion
+    public void applyMouseRepulsion(int mouseX, int mouseY, double radius, double strength)
+    {
+        double dx = this.x - mouseX;
+        double dy = this.y - mouseY;
+        double distSq = dx * dx + dy * dy;
+
+        if (distSq < radius * radius && distSq > 0 )
+        {
+            double dist = Math.sqrt(distSq);
+            double force = (1.0 - dist / radius ) * strength;
+            this.vx += (dx / dist) * force;
+            this.vy += (dy / dist) * force;
+        }
+    }
+
+    public void resolveCollision(Particle other)
+    {
         double dx = other.x - this.x;
         double dy = other.y - this.y;
-        double distance = Math.sqrt(dx * dx + dy * dy);
+        double distance = Math.sqrt(dx*dx + dy*dy);
         double minDistance = this.radius + other.radius;
 
-        // Check if particles overlap
-        if (distance < minDistance && distance > 0) {
-            double overlap = 0.5 * (minDistance - distance);
+        // check if particles intersect
+        if (distance < minDistance && distance > 0)
+        {
+            double overlap = (minDistance - distance)/2;
 
-            // Calculate surface normal vector
+            // collision line
             double nx = dx / distance;
             double ny = dy / distance;
 
-            // Push particles apart along collision normal
+            // separate particles
             this.x -= nx * overlap;
             this.y -= ny * overlap;
             other.x += nx * overlap;
             other.y += ny * overlap;
 
-            // Impulse velocity exchange
+            // calculate relative velocity impulse exchange
             double kx = this.vx - other.vx;
             double ky = this.vy - other.vy;
-            double p = (nx * kx + ny * ky);
+            double p = nx * kx + ny * ky;
 
+            // apply energy transfer
             this.vx -= p * nx * 0.8;
             this.vy -= p * ny * 0.8;
             other.vx += p * nx * 0.8;
@@ -74,32 +133,28 @@ class Particle {
         }
     }
 
-    // Interactive Force Vector: Push particle away from mouse cursor radius
-    public void applyMouseRepulsion(int mouseX, int mouseY, double radiusForce, double strength) {
-        double dx = this.x - mouseX;
-        double dy = this.y - mouseY;
-        double distSq = dx * dx + dy * dy;
+    public void applyFluidPressure(Particle other, double smoothingRadius, double pressureStrength)
+    {
+        double dx = other.x - this.x;
+        double dy = other.y - this.y;
+        double distSq = dx*dx + dy*dy;
 
-        if (distSq < radiusForce * radiusForce && distSq > 0) {
+        if (distSq < smoothingRadius * smoothingRadius && distSq > 0)
+        {
             double dist = Math.sqrt(distSq);
-            double force = (1.0 - dist / radiusForce) * strength;
-            this.vx += (dx / dist) * force;
-            this.vy += (dy / dist) * force;
+            double force = (1.0-dist / smoothingRadius) * pressureStrength;
+
+            // collision line
+            double nx = dx / dist;
+            double ny = dy / dist;
+
+            // push particles apart
+            this.vx -= nx * force;
+            this.vy -= ny * force;
+            other.vx += nx * force;
+            other.vy += ny * force;
         }
-    }
 
-    public void draw(Graphics2D g2d) {
-        // Dynamically shift color brightness based on kinetic speed
-        double speed = Math.sqrt(vx * vx + vy * vy);
-        int red = Math.min(255, (int) (40 + speed * 30));
-        int green = Math.min(255, (int) (140 + speed * 20));
-        int blue = 255;
-        g2d.setColor(new Color(red, green, blue));
 
-        int drawX = (int) (this.x - this.radius);
-        int drawY = (int) (this.y - this.radius);
-        int diameter = this.radius * 2;
-        g2d.fillOval(drawX, drawY, diameter, diameter);
     }
 }
-
